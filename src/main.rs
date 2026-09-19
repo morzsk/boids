@@ -2,7 +2,13 @@ use macroquad::miniquad::date;
 use macroquad::prelude::*;
 use macroquad::rand::{gen_range, srand};
 
+#[inline]
+fn sq(x: f32) -> f32 {
+    x * x
+}
+
 const RADIUS: f32 = 10.0;
+const PERCEPTION_RADIUS: f32 = 50.0;
 const BOID_COUNT_MIN: usize = 20;
 const BOID_COUNT_MAX: usize = 50;
 
@@ -30,20 +36,29 @@ impl Boid {
                 continue;
             }
 
-            // TODO: separation: steer away from nearby boids
+            // separation
+            let away = self.position - other.position;
+            let distance_squared = away.length_squared();
+            if distance_squared > 0.0 && distance_squared < sq(PERCEPTION_RADIUS) {
+                steer += away / distance_squared;
+            }
+
             // TODO: alignment : steer toward the average heading of neighbors
             // TODO: cohesion  : steer toward the average position of neighbors
-            let _ = other;
         }
 
+        let mut position = self.position + self.velocity;
+        position.x = position.x.rem_euclid(screen_width());
+        position.y = position.y.rem_euclid(screen_height());
+
         Boid {
-            position: self.position + self.velocity,
+            position,
             velocity: self.velocity + steer,
             ..*self
         }
     }
 
-    fn draw(&self) {
+    fn draw(&self, debug: bool) {
         let dir = self.velocity.normalize_or_zero();
         let perp = vec2(-dir.y, dir.x);
 
@@ -52,6 +67,41 @@ impl Boid {
         let right = self.position - dir * self.radius - perp * self.radius * 0.6;
 
         draw_triangle(nose, left, right, WHITE);
+
+        if !debug {
+            return;
+        }
+
+        // perception radius
+        draw_circle_lines(
+            self.position.x,
+            self.position.y,
+            PERCEPTION_RADIUS,
+            1.0,
+            GRAY,
+        );
+
+        // velocity (green)
+        let vel_end = self.position + dir * self.radius * 2.0;
+        draw_line(
+            self.position.x,
+            self.position.y,
+            vel_end.x,
+            vel_end.y,
+            2.0,
+            GREEN,
+        );
+
+        // perpendicular (red)
+        let perp_end = self.position + perp * self.radius * 2.0;
+        draw_line(
+            self.position.x,
+            self.position.y,
+            perp_end.x,
+            perp_end.y,
+            2.0,
+            RED,
+        );
     }
 }
 
@@ -74,13 +124,19 @@ async fn main() {
         })
         .collect();
 
+    let mut debug = false;
+
     loop {
         clear_background(BLACK);
+
+        if is_key_pressed(KeyCode::D) {
+            debug = !debug;
+        }
 
         boids = boids.iter().map(|boid| boid.step(&boids)).collect();
 
         for boid in &boids {
-            boid.draw();
+            boid.draw(debug);
         }
 
         next_frame().await
