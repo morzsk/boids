@@ -9,8 +9,9 @@ fn sq(x: f32) -> f32 {
 
 const RADIUS: f32 = 10.0;
 const PERCEPTION_RADIUS: f32 = 50.0;
-const SEPARATION_WEIGHT: f32 = 0.5;
-const ALIGNMENT_WEIGHT: f32 = 1.0;
+const SEPARATION_WEIGHT: f32 = 1.0;
+const ALIGNMENT_WEIGHT: f32 = 1.25;
+const COHESION_WEIGHT: f32 = 0.75;
 const MAX_SPEED: f32 = 3.0;
 const MAX_FORCE: f32 = 0.1;
 const BOID_COUNT_MIN: usize = 20;
@@ -60,10 +61,17 @@ impl Boid {
 
         let alignment: Vec2 = neighbors.iter().map(|other| other.velocity).sum();
 
-        // TODO: cohesion  : steer toward the average position of neighbors
+        let cohesion: Vec2 = if neighbors.is_empty() {
+            Vec2::ZERO
+        } else {
+            let center =
+                neighbors.iter().map(|other| other.position).sum::<Vec2>() / neighbors.len() as f32;
+            center - self.position
+        };
 
         let steer = self.steer_towards(separation) * SEPARATION_WEIGHT
-            + self.steer_towards(alignment) * ALIGNMENT_WEIGHT;
+            + self.steer_towards(alignment) * ALIGNMENT_WEIGHT
+            + self.steer_towards(cohesion) * COHESION_WEIGHT;
 
         let velocity = (self.velocity + steer).clamp_length_max(MAX_SPEED);
 
