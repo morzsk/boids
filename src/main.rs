@@ -9,6 +9,10 @@ fn sq(x: f32) -> f32 {
 
 const RADIUS: f32 = 10.0;
 const PERCEPTION_RADIUS: f32 = 50.0;
+const SEPARATION_WEIGHT: f32 = 0.5;
+const ALIGNMENT_WEIGHT: f32 = 1.0;
+const MAX_SPEED: f32 = 3.0;
+const MAX_FORCE: f32 = 0.1;
 const BOID_COUNT_MIN: usize = 20;
 const BOID_COUNT_MAX: usize = 50;
 
@@ -28,32 +32,48 @@ impl Boid {
         }
     }
 
-    fn step(&self, boids: &[Boid]) -> Boid {
-        let mut steer = Vec2::ZERO;
-
-        for other in boids {
-            if other.position == self.position {
-                continue;
-            }
-
-            // separation
-            let away = self.position - other.position;
-            let distance_squared = away.length_squared();
-            if distance_squared > 0.0 && distance_squared < sq(PERCEPTION_RADIUS) {
-                steer += away / distance_squared;
-            }
-
-            // TODO: alignment : steer toward the average heading of neighbors
-            // TODO: cohesion  : steer toward the average position of neighbors
+    // we use reynold approach
+    fn steer_towards(&self, direction: Vec2) -> Vec2 {
+        if direction == Vec2::ZERO {
+            return Vec2::ZERO;
         }
+        let desired = direction.normalize_or_zero() * MAX_SPEED;
+        (desired - self.velocity).clamp_length_max(MAX_FORCE)
+    }
 
-        let mut position = self.position + self.velocity;
+    fn step(&self, boids: &[Boid]) -> Boid {
+        let neighbors: Vec<&Boid> = boids
+            .iter()
+            .filter(|other| {
+                let distance_squared = self.position.distance_squared(other.position);
+                distance_squared > 0.0 && distance_squared < sq(PERCEPTION_RADIUS)
+            })
+            .collect();
+
+        let separation: Vec2 = neighbors
+            .iter()
+            .map(|other| {
+                let away = self.position - other.position;
+                away / away.length_squared()
+            })
+            .sum();
+
+        let alignment: Vec2 = neighbors.iter().map(|other| other.velocity).sum();
+
+        // TODO: cohesion  : steer toward the average position of neighbors
+
+        let steer = self.steer_towards(separation) * SEPARATION_WEIGHT
+            + self.steer_towards(alignment) * ALIGNMENT_WEIGHT;
+
+        let velocity = (self.velocity + steer).clamp_length_max(MAX_SPEED);
+
+        let mut position = self.position + velocity;
         position.x = position.x.rem_euclid(screen_width());
         position.y = position.y.rem_euclid(screen_height());
 
         Boid {
             position,
-            velocity: self.velocity + steer,
+            velocity,
             ..*self
         }
     }
