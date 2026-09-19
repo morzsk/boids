@@ -1,137 +1,15 @@
 use macroquad::miniquad::date;
 use macroquad::prelude::*;
-use macroquad::rand::{gen_range, srand};
+use macroquad::rand::srand;
+use macroquad::ui::root_ui;
 
-#[inline]
-fn sq(x: f32) -> f32 {
-    x * x
-}
+mod boid;
+mod config;
+mod ui;
 
-const RADIUS: f32 = 10.0;
-const PERCEPTION_RADIUS: f32 = 50.0;
-const SEPARATION_WEIGHT: f32 = 1.0;
-const ALIGNMENT_WEIGHT: f32 = 1.25;
-const COHESION_WEIGHT: f32 = 0.75;
-const MAX_SPEED: f32 = 3.0;
-const MAX_FORCE: f32 = 0.1;
-const BOID_COUNT_MIN: usize = 20;
-const BOID_COUNT_MAX: usize = 50;
-
-#[derive(Clone, Copy)]
-struct Boid {
-    position: Vec2,
-    velocity: Vec2,
-    radius: f32,
-}
-
-impl Boid {
-    fn new(position: Vec2, velocity: Vec2) -> Self {
-        Boid {
-            position,
-            velocity,
-            radius: RADIUS,
-        }
-    }
-
-    // we use reynold approach
-    fn steer_towards(&self, direction: Vec2) -> Vec2 {
-        if direction == Vec2::ZERO {
-            return Vec2::ZERO;
-        }
-        let desired = direction.normalize_or_zero() * MAX_SPEED;
-        (desired - self.velocity).clamp_length_max(MAX_FORCE)
-    }
-
-    fn step(&self, boids: &[Boid]) -> Boid {
-        let neighbors: Vec<&Boid> = boids
-            .iter()
-            .filter(|other| {
-                let distance_squared = self.position.distance_squared(other.position);
-                distance_squared > 0.0 && distance_squared < sq(PERCEPTION_RADIUS)
-            })
-            .collect();
-
-        let separation: Vec2 = neighbors
-            .iter()
-            .map(|other| {
-                let away = self.position - other.position;
-                away / away.length_squared()
-            })
-            .sum();
-
-        let alignment: Vec2 = neighbors.iter().map(|other| other.velocity).sum();
-
-        let cohesion: Vec2 = if neighbors.is_empty() {
-            Vec2::ZERO
-        } else {
-            let center =
-                neighbors.iter().map(|other| other.position).sum::<Vec2>() / neighbors.len() as f32;
-            center - self.position
-        };
-
-        let steer = self.steer_towards(separation) * SEPARATION_WEIGHT
-            + self.steer_towards(alignment) * ALIGNMENT_WEIGHT
-            + self.steer_towards(cohesion) * COHESION_WEIGHT;
-
-        let velocity = (self.velocity + steer).clamp_length_max(MAX_SPEED);
-
-        let mut position = self.position + velocity;
-        position.x = position.x.rem_euclid(screen_width());
-        position.y = position.y.rem_euclid(screen_height());
-
-        Boid {
-            position,
-            velocity,
-            ..*self
-        }
-    }
-
-    fn draw(&self, debug: bool) {
-        let dir = self.velocity.normalize_or_zero();
-        let perp = vec2(-dir.y, dir.x);
-
-        let nose = self.position + dir * self.radius;
-        let left = self.position - dir * self.radius + perp * self.radius * 0.6;
-        let right = self.position - dir * self.radius - perp * self.radius * 0.6;
-
-        draw_triangle(nose, left, right, WHITE);
-
-        if !debug {
-            return;
-        }
-
-        // perception radius
-        draw_circle_lines(
-            self.position.x,
-            self.position.y,
-            PERCEPTION_RADIUS,
-            1.0,
-            GRAY,
-        );
-
-        // velocity (green)
-        let vel_end = self.position + dir * self.radius * 2.0;
-        draw_line(
-            self.position.x,
-            self.position.y,
-            vel_end.x,
-            vel_end.y,
-            2.0,
-            GREEN,
-        );
-
-        // perpendicular (red)
-        let perp_end = self.position + perp * self.radius * 2.0;
-        draw_line(
-            self.position.x,
-            self.position.y,
-            perp_end.x,
-            perp_end.y,
-            2.0,
-            RED,
-        );
-    }
-}
+use crate::boid::{spawn_boid, spawn_boids};
+use crate::config::Config;
+use crate::ui::{draw_controls, make_skin};
 
 #[macroquad::main("MyGame")]
 async fn main() {
@@ -139,32 +17,44 @@ async fn main() {
 
     next_frame().await;
 
-    let count = gen_range(BOID_COUNT_MIN, BOID_COUNT_MAX);
-    let mut boids: Vec<Boid> = (0..count)
-        .map(|_| {
-            Boid::new(
-                vec2(
-                    gen_range(0.0, screen_width()),
-                    gen_range(0.0, screen_height()),
-                ),
-                vec2(gen_range(-1.0, 1.0), gen_range(-1.0, 1.0)),
-            )
-        })
-        .collect();
-
     let mut debug = false;
+    let mut show_controls = true;
+    let mut config = Config::default();
+    let mut boids = spawn_boids(config.boid_count as usize);
+
+    let skin = make_skin();
 
     loop {
         clear_background(BLACK);
+        root_ui().push_skin(&skin);
 
-        if is_key_pressed(KeyCode::D) {
+        if is_key_pressed(KeyCode::E) {
             debug = !debug;
         }
+        if is_key_pressed(KeyCode::R) {
+            boids = spawn_boids(config.boid_count as usize);
+        }
+        if is_key_pressed(KeyCode::T) {
+            show_controls = !show_controls;
+        }
 
-        boids = boids.iter().map(|boid| boid.step(&boids)).collect();
+        if show_controls {
+            draw_controls(&mut config);
+        }
+
+        let target = config.boid_count as usize;
+        while boids.len() < target {
+            boids.push(spawn_boid());
+        }
+        boids.truncate(target);
+
+        boids = boids
+            .iter()
+            .map(|boid| boid.step(&boids, &config))
+            .collect();
 
         for boid in &boids {
-            boid.draw(debug);
+            boid.draw(debug, &config);
         }
 
         next_frame().await
